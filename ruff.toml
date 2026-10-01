@@ -1,0 +1,32 @@
+# Shared lint and format config for every service in the repo.
+target-version = "py314"
+line-length = 100
+
+[lint]
+select = [
+    "E", "W", # pycodestyle
+    "F",      # pyflakes: unused imports, undefined names
+    "I",      # isort: import ordering
+    "B",      # bugbear: likely bugs (mutable defaults, etc.)
+    "UP",     # pyupgrade: modern syntax for the target version
+    "SIM",    # simplify
+    "D",      # pydocstyle: docstrings on public code
+    "S",      # bandit: security smells (Phase 4/5 material)
+]
+ignore = [
+    "D100", # module docstrings
+    "D104", # package (__init__.py) docstrings
+]
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.per-file-ignores]
+"**/tests/**" = [
+    "D",    # test names are the documentation
+    "S101", # assert is how pytest works
+]
+"**/alembic/**" = ["D"] # generated migration files
+
+[lint.isort]
+known-first-party = ["app"]

@@ -9,9 +9,13 @@ from sqlalchemy.orm import Session
 from app.db import DbSession, is_unique_violation
 from app.domain import CategoryEnum
 from app.models import SKU_UNIQUE_INDEX, Product
-from app.schemas import ProductCreate, ProductRead, ProductUpdate
+from app.pagination import InvalidCursorError, decode_cursor, encode_cursor
+from app.schemas import ProductCreate, ProductPage, ProductRead, ProductUpdate
 
 router = APIRouter()
+
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100  # caps the work one request can ask the database to do
 
 
 def get_product_or_404(db: Session, product_id: int) -> Product:
@@ -35,23 +39,39 @@ def commit_or_409(db: Session, sku: str) -> None:
         raise
 
 
-@router.get("", response_model=list[ProductRead])
+@router.get("", response_model=ProductPage)
 def list_products(
     db: DbSession,
     category: CategoryEnum | None = None,
     fire_rated: Annotated[
         bool | None, Query(description="true: rated products only; false: unrated only")
     ] = None,
-) -> list[Product]:
-    """List products, optionally filtered by category and fire rating."""
-    stmt = select(Product).order_by(Product.id)
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+    cursor: Annotated[
+        str | None, Query(description="`next_cursor` from the previous page; omit for the first")
+    ] = None,
+) -> ProductPage:
+    """List products, optionally filtered, in pages ordered by id (keyset pagination)."""
+    stmt = select(Product).order_by(Product.id).limit(limit + 1)  # one extra row: is there more?
+    if cursor is not None:
+        try:
+            after_id = decode_cursor(cursor)
+        except InvalidCursorError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid cursor.") from exc
+        stmt = stmt.where(Product.id > after_id)
     if category is not None:
         stmt = stmt.where(Product.category == category)
     if fire_rated is True:
         stmt = stmt.where(Product.fire_rating_minutes > 0)
     elif fire_rated is False:
         stmt = stmt.where(Product.fire_rating_minutes == 0)
-    return list(db.scalars(stmt))
+
+    rows = list(db.scalars(stmt))
+    page, has_more = rows[:limit], len(rows) > limit
+    return ProductPage(
+        items=[ProductRead.model_validate(product) for product in page],
+        next_cursor=encode_cursor(page[-1].id) if has_more else None,
+    )
 
 
 @router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)

@@ -64,14 +64,14 @@ Then check it:
 
 ## API
 
-catalog-service, with interactive docs at `/docs` once running:
+catalog-service **v0.2.0**, with interactive docs at `/docs` once running. Changes and migration notes are in [catalog-service/CHANGELOG.md](catalog-service/CHANGELOG.md); compatibility rules are in [decision 14](docs/decisions.md#14-api-versioning-and-breaking-change-policy).
 
 | Method | Path | Success | Errors |
 |---|---|---|---|
 | `GET` | `/health/` | 200 (process is up) | |
 | `GET` | `/health/ready` | 200 (database reachable) | 503 |
 | `POST` | `/products` | 201 + product | 409 duplicate SKU · 422 invalid |
-| `GET` | `/products?category=&fire_rated=` | 200 + list | 422 invalid filter |
+| `GET` | `/products?category=&fire_rated=&limit=&cursor=` | 200 + page: `{items, next_cursor}` | 400 invalid cursor · 422 invalid filter |
 | `GET` | `/products/{id}` | 200 + product | 404 |
 | `PATCH` | `/products/{id}` | 200 + product (only sent fields change) | 404 · 409 · 422 |
 | `PUT` | `/products/{id}` | 200 + product (full replacement) | 404 · 409 · 422 |
@@ -114,10 +114,12 @@ doorspec/
     │   ├── config.py         # typed settings from env / .env
     │   ├── db.py             # engine, session factory, get_db dependency
     │   ├── domain.py         # enums and limits shared by models and schemas
+    │   ├── pagination.py     # opaque cursors for keyset pagination
     │   ├── models.py         # SQLAlchemy ORM models (storage)
     │   ├── schemas.py        # Pydantic schemas (API contract)
     │   └── routers/          # HTTP endpoints by resource
     ├── alembic/              # database migrations
+    ├── CHANGELOG.md          # release notes, including breaking changes
     └── tests/
 ```
 
@@ -135,6 +137,8 @@ The reasoning behind the architecture, including the alternatives considered and
 - [Validate at the API edge and enforce in the database](docs/decisions.md#4-validate-at-the-api-edge-and-enforce-in-the-database)
 - [Enums stored as VARCHAR + CHECK, not native Postgres ENUM](docs/decisions.md#5-enums-stored-as-varchar--check-not-native-postgres-enum)
 - [Separate liveness and readiness endpoints](docs/decisions.md#8-separate-liveness-and-readiness-endpoints)
+- [Cursor (keyset) pagination, not offset](docs/decisions.md#13-cursor-keyset-pagination-not-offset)
+- [API versioning and breaking-change policy](docs/decisions.md#14-api-versioning-and-breaking-change-policy)
 
 ## Roadmap
 

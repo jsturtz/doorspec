@@ -16,6 +16,8 @@ A running log of the significant design choices in DoorSpec: what was decided, w
 | 10 | [Deterministic constraint names](#10-deterministic-constraint-names) | Database |
 | 11 | [Synchronous SQLAlchemy with sync route handlers](#11-synchronous-sqlalchemy-with-sync-route-handlers) | Performance |
 | 12 | [API tests run against real Postgres, rolled back per test](#12-api-tests-run-against-real-postgres-rolled-back-per-test) | Testing |
+| 13 | [Cursor (keyset) pagination, not offset](#13-cursor-keyset-pagination-not-offset) | API design |
+| 14 | [API versioning and breaking-change policy](#14-api-versioning-and-breaking-change-policy) | API design |
 
 ---
 
@@ -112,3 +114,35 @@ A running log of the significant design choices in DoorSpec: what was decided, w
 **Why:** SQLite would hide exactly what needs testing: it ignores `VARCHAR` lengths, reports constraint violations differently (so the 409 path couldn't be tested), and handles CHECK constraints and transactions differently. Building the schema from migrations means every test run also verifies the migrations. Per-test rollback keeps tests isolated and fast (the full suite runs in under a second) without recreating the database.
 
 **Trade-off:** Tests need the database container running.
+
+## 13. Cursor (keyset) pagination, not offset
+
+**Context:** `GET /products` returned every row. The catalog will grow, so the endpoint must page. The common approach is offset pagination (`?page=3` → `LIMIT 20 OFFSET 40`).
+
+**Decision:** Keyset pagination ordered by `id`. The client sends `limit` (1 to 100, default 20) and an opaque `cursor`. The server queries `WHERE id > :last_id ORDER BY id LIMIT :limit + 1`; the extra row reveals whether another page exists, without a `COUNT`. The response is `{"items": [...], "next_cursor": "..." | null}`.
+
+**Why:**
+- *Performance:* `OFFSET n` makes the database read and discard `n` rows, so deep pages get slower in proportion to their depth. `id > :last_id` is an index seek, so every page costs the same.
+- *Correctness:* with offset, a row inserted or deleted earlier in the list shifts every later row, so clients see duplicates or silently skip items. A keyset cursor means "after this row", which doesn't move. (Both behaviours are covered by tests.)
+- *Opaque cursor:* the cursor is base64url-encoded JSON, not `?after_id=`. Clients pass it back without depending on its contents, so the sort order or cursor contents can change later without breaking anyone. Malformed cursors get a `400`.
+- *Capped `limit`:* an unbounded page size would let one request ask the database for the whole table, which is a denial-of-service vector (OWASP API4: unrestricted resource consumption).
+
+**Trade-offs:** No jumping to an arbitrary page, and no total count. These are acceptable for an API consumed by services and infinite-scroll UIs; offset remains reasonable for small admin tables that need page numbers. Sorting by a non-unique column later would need a tie-breaker in the cursor (`WHERE (manufacturer, id) > (:m, :id)`) to avoid skipping rows at page boundaries.
+
+**Consequence:** this changed the response shape of `GET /products` from an array to an object, a **breaking change**. See decision 14.
+
+## 14. API versioning and breaking-change policy
+
+**Context:** Decision 13 changed `GET /products` from a JSON array to an envelope, which breaks any client reading the old shape. Once other services consume catalog (rules-service in Phase 2), changes like this must not break them.
+
+**Decision:**
+- **Each service is versioned independently** with [Semantic Versioning](https://semver.org/), since services deploy independently (decision 1). The version lives in the service's `pyproject.toml` and is published in its OpenAPI spec (`info.version`). Every change is recorded in the service's `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com/)), with a migration note for anything breaking.
+- **Pre-1.0 (now):** the API is still taking shape and has no external consumers, so breaking changes are allowed in a minor release (0.1.0 → 0.2.0), marked **BREAKING** in the changelog. This is the pagination change.
+- **From 1.0 onward:**
+  - *Within a major version, changes are additive only:* new endpoints, new optional request fields, new response fields. Clients must ignore response fields they don't recognise. Nothing is removed, renamed, retyped, or made required.
+  - *A breaking change ships as a new major version under a new URL prefix* (`/v1/` → `/v2/`), with both served side by side. The old version is deprecated with `Deprecation` and `Sunset` response headers, announced in the changelog, and removed only after consumers have migrated.
+  - *Contract tests* (Phase 2) fail the build if a change would break a consumer's expectations of the OpenAPI contract.
+
+**Why:** In a microservice system the API is the only coupling between teams. Breaking it forces every consumer to redeploy in lockstep, which removes the independence that justified separate services. Additive-only changes plus explicit major versions let producers evolve while consumers upgrade on their own schedule.
+
+**Why URL versioning:** versioning by URL prefix (rather than a header or media type) is visible in logs, routable at the gateway, and trivial to test with curl. Header-based versioning keeps URLs stable but is easy to get wrong and harder to debug.

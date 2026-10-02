@@ -1,4 +1,6 @@
 import logging
+import tomllib
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
@@ -9,7 +11,14 @@ from app.routers import products
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+# pyproject.toml is the single source of truth for the version; CHANGELOG.md records what changed.
+_PROJECT = tomllib.loads((Path(__file__).resolve().parent.parent / "pyproject.toml").read_text())
+
+app = FastAPI(
+    title="DoorSpec catalog-service",
+    version=_PROJECT["project"]["version"],
+    description=_PROJECT["project"]["description"],
+)
 
 
 @app.get("/")

@@ -101,7 +101,7 @@ def test_create_invalid_body_returns_422(client, overrides):
 
 def test_create_invalid_body_writes_nothing(client):
     client.post("/products", json={**PRODUCT, "category": "doorknob"})
-    assert client.get("/products").json() == []
+    assert client.get("/products").json()["items"] == []
 
 
 # --- GET /products/{id} ------------------------------------------------------
@@ -136,19 +136,19 @@ def test_list_empty(client):
     with check:
         assert response.status_code == 200
     with check:
-        assert response.json() == []
+        assert response.json() == {"items": [], "next_cursor": None}
 
 
 def test_list_returns_all_ordered_by_id(client):
     first = create(client)
     second = create(client, **HINGE)
-    assert [p["id"] for p in client.get("/products").json()] == [first["id"], second["id"]]
+    assert [p["id"] for p in client.get("/products").json()["items"]] == [first["id"], second["id"]]
 
 
 def test_list_filters_by_category(client):
     create(client)
     hinge = create(client, **HINGE)
-    assert client.get("/products", params={"category": "hinge"}).json() == [hinge]
+    assert client.get("/products", params={"category": "hinge"}).json()["items"] == [hinge]
 
 
 @pytest.mark.parametrize(
@@ -159,14 +159,15 @@ def test_list_filters_by_fire_rated(client, fire_rated, expected_skus):
     create(client)
     create(client, **HINGE)
     params = {} if fire_rated is None else {"fire_rated": fire_rated}
-    assert [p["sku"] for p in client.get("/products", params=params).json()] == expected_skus
+    items = client.get("/products", params=params).json()["items"]
+    assert [p["sku"] for p in items] == expected_skus
 
 
 def test_list_combines_filters(client):
     create(client)
     create(client, **HINGE)
     params = {"category": "hinge", "fire_rated": "true"}
-    assert client.get("/products", params=params).json() == []
+    assert client.get("/products", params=params).json()["items"] == []
 
 
 @pytest.mark.parametrize(
@@ -174,6 +175,100 @@ def test_list_combines_filters(client):
 )
 def test_list_invalid_filter_returns_422(client, params):
     assert client.get("/products", params=params).status_code == 422
+
+
+# --- GET /products pagination ------------------------------------------------
+
+
+def create_many(client: TestClient, count: int, **overrides) -> list[dict]:
+    return [create(client, **{"sku": f"SKU-{i:03d}", **overrides}) for i in range(count)]
+
+
+def get_all_pages(client: TestClient, **params) -> list[list[dict]]:
+    pages, cursor = [], None
+    while True:
+        query = {**params, **({"cursor": cursor} if cursor else {})}
+        body = client.get("/products", params=query).json()
+        pages.append(body["items"])
+        cursor = body["next_cursor"]
+        if cursor is None:
+            return pages
+
+
+def test_pagination_walks_every_product_exactly_once_in_order(client):
+    created = create_many(client, 5)
+    pages = get_all_pages(client, limit=2)
+    with check:
+        assert [len(page) for page in pages] == [2, 2, 1]
+    with check:
+        assert [p["id"] for page in pages for p in page] == [p["id"] for p in created]
+
+
+def test_last_page_has_null_cursor_when_items_divide_evenly(client):
+    create_many(client, 4)
+    pages = get_all_pages(client, limit=2)
+    assert [len(page) for page in pages] == [2, 2]  # no trailing empty page
+
+
+def test_default_page_size_is_20(client):
+    create_many(client, 21)
+    body = client.get("/products").json()
+    with check:
+        assert len(body["items"]) == 20
+    with check:
+        assert body["next_cursor"] is not None
+
+
+def test_pagination_respects_filters_across_pages(client):
+    hinges = []
+    for i in range(3):  # interleave, so the filter must skip rows on every page
+        create(client, sku=f"LCK-{i}")
+        hinges.append(create(client, **{**HINGE, "sku": f"HNG-{i}"}))
+    pages = get_all_pages(client, category="hinge", limit=2)
+    assert [p["id"] for page in pages for p in page] == [h["id"] for h in hinges]
+
+
+def test_deleting_a_seen_item_does_not_skip_unseen_items(client):
+    """Offset pagination would skip a row here; keyset pagination doesn't."""
+    created = create_many(client, 5)
+    first = client.get("/products", params={"limit": 2}).json()
+    client.delete(f"/products/{created[0]['id']}")
+    second = client.get("/products", params={"limit": 2, "cursor": first["next_cursor"]}).json()
+    assert [p["id"] for p in second["items"]] == [created[2]["id"], created[3]["id"]]
+
+
+def test_items_inserted_during_paging_are_not_duplicated(client):
+    created = create_many(client, 4)
+    first = client.get("/products", params={"limit": 2}).json()
+    create(client, sku="LATE-ARRIVAL")
+    second = client.get("/products", params={"limit": 2, "cursor": first["next_cursor"]}).json()
+    seen_first = {p["id"] for p in first["items"]}
+    with check:
+        assert not seen_first & {p["id"] for p in second["items"]}
+    with check:
+        assert [p["id"] for p in second["items"]] == [created[2]["id"], created[3]["id"]]
+
+
+@pytest.mark.parametrize("limit", [0, -1, 101, "ten"])
+def test_out_of_range_limit_returns_422(client, limit):
+    assert client.get("/products", params={"limit": limit}).status_code == 422
+
+
+def test_max_limit_is_accepted(client):
+    assert client.get("/products", params={"limit": 100}).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    ["not-base64!!", "bm90IGpzb24", "eyJpZCI6ICJ4In0", "eyJpZCI6IC0xfQ", "W10", "eyJpZCI6dHJ1ZX0"],
+    ids=["garbage", "not-json", "id-not-int", "negative-id", "not-object", "id-is-bool"],
+)
+def test_invalid_cursor_returns_400(client, cursor):
+    response = client.get("/products", params={"cursor": cursor})
+    with check:
+        assert response.status_code == 400
+    with check:
+        assert response.json() == {"detail": "Invalid cursor."}
 
 
 # --- PATCH /products/{id} ----------------------------------------------------
@@ -397,4 +492,4 @@ def test_database_rejects_duplicate_sku(db_session: Session):
 
 def test_tests_are_isolated_from_each_other(client):
     """Every other test created products; each must have been rolled back."""
-    assert client.get("/products").json() == []
+    assert client.get("/products").json()["items"] == []

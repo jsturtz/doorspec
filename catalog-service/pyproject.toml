@@ -1,8 +1,7 @@
 [project]
 name = "catalog-service"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+version = "0.2.0"
+description = "DoorSpec catalog of door hardware products and their attributes."
 requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.0",

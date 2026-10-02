@@ -82,3 +82,12 @@ class ProductUpdate(BaseModel):
             if getattr(self, name) is None:
                 raise ValueError(f"{name} cannot be null.")
         return self
+
+
+class ProductPage(BaseModel):
+    """One page of products from a keyset-paginated listing."""
+
+    items: list[ProductRead]
+    next_cursor: str | None = Field(
+        description="Pass as `cursor` to fetch the next page. Null on the last page."
+    )

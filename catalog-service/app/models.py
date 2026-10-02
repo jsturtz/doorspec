@@ -1,10 +1,11 @@
 from enum import Enum as PyEnum
 
-from sqlalchemy import CheckConstraint, Enum, Index, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 from app.domain import (
+    CERTIFICATION_MAX_LENGTH,
     FINISH_MAX_LENGTH,
     MANUFACTURER_MAX_LENGTH,
     SKU_MAX_LENGTH,
@@ -16,6 +17,7 @@ from app.domain import (
 )
 
 SKU_UNIQUE_INDEX = "ix_products_sku"
+CERTIFICATION_UNIQUE = "uq_certifications_product_id"
 
 
 def _string_enum(enum_cls: type[PyEnum], name: str) -> Enum:
@@ -58,3 +60,26 @@ class Product(Base):
     electrified: Mapped[bool]
     voltage: Mapped[int | None]
     finish: Mapped[str] = mapped_column(String(FINISH_MAX_LENGTH))
+
+    # Lazy by default: reading product.certifications on a loaded product issues its own SELECT.
+    # List endpoints must eager-load with selectinload() or they become N+1 queries.
+    certifications: Mapped[list[Certification]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        passive_deletes=True,  # let ON DELETE CASCADE remove rows instead of loading them first
+        order_by="Certification.id",
+    )
+
+
+class Certification(Base):
+    """A standard or listing a product is certified to, e.g. "UL 10C"."""
+
+    __tablename__ = "certifications"
+    __table_args__ = (UniqueConstraint("product_id", "standard", name=CERTIFICATION_UNIQUE),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # No separate index: the unique (product_id, standard) index already serves product_id lookups.
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"))
+    standard: Mapped[str] = mapped_column(String(CERTIFICATION_MAX_LENGTH))
+
+    product: Mapped[Product] = relationship(back_populates="certifications")

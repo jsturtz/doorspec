@@ -110,7 +110,7 @@ def test_create_rejects_unknown_field():
 
 def test_read_does_not_enforce_input_rules():
     """A stored row that breaks a Create rule must still be readable, not a 500."""
-    product = ProductRead(id=1, **{**VALID, "voltage": None})
+    product = ProductRead(id=1, certifications=[], **{**VALID, "voltage": None})
     with check:
         assert product.electrified is True
     with check:
@@ -128,6 +128,7 @@ def test_read_builds_from_object_attributes():
         electrified = True
         voltage = 24
         finish = "626"
+        certifications = []
 
     product = ProductRead.model_validate(FakeRow())
     with check:

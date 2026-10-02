@@ -18,6 +18,7 @@ A running log of the significant design choices in DoorSpec: what was decided, w
 | 12 | [API tests run against real Postgres, rolled back per test](#12-api-tests-run-against-real-postgres-rolled-back-per-test) | Testing |
 | 13 | [Cursor (keyset) pagination, not offset](#13-cursor-keyset-pagination-not-offset) | API design |
 | 14 | [API versioning and breaking-change policy](#14-api-versioning-and-breaking-change-policy) | API design |
+| 15 | [Relationships are eager-loaded explicitly, guarded by query-count tests](#15-relationships-are-eager-loaded-explicitly-guarded-by-query-count-tests) | Performance |
 
 ---
 
@@ -146,3 +147,15 @@ A running log of the significant design choices in DoorSpec: what was decided, w
 **Why:** In a microservice system the API is the only coupling between teams. Breaking it forces every consumer to redeploy in lockstep, which removes the independence that justified separate services. Additive-only changes plus explicit major versions let producers evolve while consumers upgrade on their own schedule.
 
 **Why URL versioning:** versioning by URL prefix (rather than a header or media type) is visible in logs, routable at the gateway, and trivial to test with curl. Header-based versioning keeps URLs stable but is easy to get wrong and harder to debug.
+
+## 15. Relationships are eager-loaded explicitly, guarded by query-count tests
+
+**Context:** Products gained a one-to-many `certifications` relationship. SQLAlchemy relationships are lazy by default, so the list endpoint silently became an N+1 query: 21 queries for a 20-item page. ([Measurements](n-plus-one.md).)
+
+**Decision:** Any query whose results will be serialized with a relationship eager-loads it explicitly with `selectinload` (one-to-many) or `joinedload` (many-to-one). A query-count test for each list endpoint asserts a **fixed** number of statements at two different data sizes, so a regression fails CI rather than surfacing as production latency.
+
+**Why:** N+1 is invisible to functional tests and to small dev databases, and grows with page size in production. Counting statements (via SQLAlchemy's `before_cursor_execute` event) makes it testable. Testing at two sizes proves the count is independent of N.
+
+**Alternatives considered:** `lazy="raise"` on relationships turns any accidental lazy load into an error. It's stricter, but it also breaks harmless single-object access. Revisit if the model grows more relationships.
+
+**Consequence:** eager loading also prevents a subtle correctness bug. A lazy load triggers **autoflush**, which can send pending changes to the database at an unexpected point, outside the error handling built around `commit()`.

@@ -64,7 +64,7 @@ Then check it:
 
 ## API
 
-catalog-service **v0.2.0**, with interactive docs at `/docs` once running. Changes and migration notes are in [catalog-service/CHANGELOG.md](catalog-service/CHANGELOG.md); compatibility rules are in [decision 14](docs/decisions.md#14-api-versioning-and-breaking-change-policy).
+catalog-service **v0.3.0**, with interactive docs at `/docs` once running. Changes and migration notes are in [catalog-service/CHANGELOG.md](catalog-service/CHANGELOG.md); compatibility rules are in [decision 14](docs/decisions.md#14-api-versioning-and-breaking-change-policy).
 
 | Method | Path | Success | Errors |
 |---|---|---|---|
@@ -107,7 +107,8 @@ doorspec/
 ├── .pre-commit-config.yaml
 ├── pyrightconfig.json        # editor import roots: one per service
 ├── docs/
-│   └── decisions.md          # design decisions and their rationale
+│   ├── decisions.md          # design decisions and their rationale
+│   └── n-plus-one.md         # N+1 query problem: measured and fixed
 └── catalog-service/          # self-contained uv project
     ├── app/
     │   ├── main.py           # FastAPI app, health endpoints, router registration
@@ -139,6 +140,7 @@ The reasoning behind the architecture, including the alternatives considered and
 - [Separate liveness and readiness endpoints](docs/decisions.md#8-separate-liveness-and-readiness-endpoints)
 - [Cursor (keyset) pagination, not offset](docs/decisions.md#13-cursor-keyset-pagination-not-offset)
 - [API versioning and breaking-change policy](docs/decisions.md#14-api-versioning-and-breaking-change-policy)
+- [N+1 queries: measured (21 queries → 2) and guarded by tests](docs/n-plus-one.md)
 
 ## Roadmap
 

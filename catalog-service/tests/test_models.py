@@ -29,6 +29,7 @@ def test_read_schema_validates_from_model_instance():
         "electrified": True,
         "voltage": 24,
         "finish": "626",
+        "certifications": [],
     }
 
 

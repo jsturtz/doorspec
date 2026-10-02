@@ -1,6 +1,6 @@
 [project]
 name = "catalog-service"
-version = "0.2.0"
+version = "0.3.0"
 description = "DoorSpec catalog of door hardware products and their attributes."
 requires-python = ">=3.14"
 dependencies = [

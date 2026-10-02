@@ -45,3 +45,7 @@ FINISH_MAX_LENGTH = 32
 # Door hardware is almost always 12 or 24 VDC; 48 leaves headroom without accepting nonsense.
 VOLTAGE_MIN_EXCLUSIVE = 0
 VOLTAGE_MAX = 48
+
+# Listings and standards a product is certified to, e.g. "UL 10C" or "ANSI/BHMA A156.13 Grade 1".
+CERTIFICATION_MAX_LENGTH = 64
+MAX_CERTIFICATIONS_PER_PRODUCT = 20

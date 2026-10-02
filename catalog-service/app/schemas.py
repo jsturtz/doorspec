@@ -3,8 +3,10 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain import (
+    CERTIFICATION_MAX_LENGTH,
     FINISH_MAX_LENGTH,
     MANUFACTURER_MAX_LENGTH,
+    MAX_CERTIFICATIONS_PER_PRODUCT,
     SKU_MAX_LENGTH,
     SKU_PATTERN,
     VOLTAGE_MAX,
@@ -19,6 +21,23 @@ Sku = Annotated[str, Field(min_length=1, max_length=SKU_MAX_LENGTH, pattern=SKU_
 Manufacturer = Annotated[str, Field(min_length=1, max_length=MANUFACTURER_MAX_LENGTH)]
 Finish = Annotated[str, Field(min_length=1, max_length=FINISH_MAX_LENGTH)]
 Voltage = Annotated[int, Field(gt=VOLTAGE_MIN_EXCLUSIVE, le=VOLTAGE_MAX)]
+Standard = Annotated[str, Field(min_length=1, max_length=CERTIFICATION_MAX_LENGTH)]
+
+
+class CertificationCreate(BaseModel):
+    """A certification submitted with a product."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    standard: Standard
+
+
+class CertificationRead(BaseModel):
+    """A certification as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    standard: str
 
 
 class ProductBase(BaseModel):
@@ -39,6 +58,18 @@ class ProductCreate(ProductBase):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    certifications: list[CertificationCreate] = Field(
+        default_factory=list, max_length=MAX_CERTIFICATIONS_PER_PRODUCT
+    )
+
+    @model_validator(mode="after")
+    def check_certifications_unique(self) -> Self:
+        """Each standard may appear at most once per product."""
+        standards = [c.standard for c in self.certifications]
+        if len(standards) != len(set(standards)):
+            raise ValueError("Certifications must not contain duplicate standards.")
+        return self
+
     @model_validator(mode="after")
     def check_voltage_matches_electrified(self) -> Self:
         """Electrified products need a voltage; non-electrified products can't have one."""
@@ -53,7 +84,9 @@ class ProductRead(ProductBase):
     """Schema for reading a product."""
 
     model_config = ConfigDict(from_attributes=True)
+
     id: int
+    certifications: list[CertificationRead]
 
 
 class ProductUpdate(BaseModel):

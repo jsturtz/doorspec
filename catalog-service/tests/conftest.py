@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Engine, create_engine, make_url, text
+from sqlalchemy import Engine, create_engine, event, make_url, text
 
 from app.config import Settings, get_settings
 
@@ -82,3 +82,30 @@ def client(db_session: Session) -> Iterator[TestClient]:
         yield TestClient(app, raise_server_exceptions=False)
     finally:
         app.dependency_overrides.clear()
+
+
+class QueryCounter:
+    """Records the SQL statements executed on the test engine while active."""
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    @property
+    def selects(self) -> list[str]:
+        """SELECT statements only (ignores SAVEPOINT/RELEASE noise from the test transaction)."""
+        return [s for s in self.statements if s.lstrip().upper().startswith("SELECT")]
+
+
+@pytest.fixture
+def query_counter(engine: Engine) -> Iterator[QueryCounter]:
+    """Count statements via SQLAlchemy's before_cursor_execute event (catches lazy loads too)."""
+    counter = QueryCounter()
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        counter.statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        yield counter
+    finally:
+        event.remove(engine, "before_cursor_execute", record)

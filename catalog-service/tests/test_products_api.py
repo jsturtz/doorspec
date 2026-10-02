@@ -3,10 +3,11 @@
 import pytest
 from fastapi.testclient import TestClient
 from pytest_check import check
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Product
+from app.models import Certification, Product
 
 PRODUCT = {
     "sku": "LCK-100",
@@ -17,6 +18,7 @@ PRODUCT = {
     "electrified": True,
     "voltage": 24,
     "finish": "626",
+    "certifications": [],
 }
 
 HINGE = {
@@ -28,6 +30,7 @@ HINGE = {
     "electrified": False,
     "voltage": None,
     "finish": "US26D",
+    "certifications": [],
 }
 
 MISSING_ID = 999_999
@@ -367,6 +370,7 @@ REPLACEMENT = {
     "electrified": False,
     "voltage": None,
     "finish": "US32D",
+    "certifications": [],
 }
 
 
@@ -442,6 +446,82 @@ def test_put_invalid_body_returns_422_and_changes_nothing(client, overrides):
         assert response.status_code == 422
     with check:
         assert client.get(f"/products/{created['id']}").json() == created
+
+
+# --- Certifications -----------------------------------------------------------
+
+
+def certs(*standards: str) -> list[dict]:
+    return [{"standard": s} for s in standards]
+
+
+def test_create_with_certifications_returns_them_in_order(client):
+    body = create(client, certifications=certs("UL 10C", "ANSI/BHMA A156.13 Grade 1"))
+    assert body["certifications"] == certs("UL 10C", "ANSI/BHMA A156.13 Grade 1")
+
+
+def test_certifications_default_to_empty(client):
+    body = {k: v for k, v in PRODUCT.items() if k != "certifications"}
+    response = client.post("/products", json=body)
+    with check:
+        assert response.status_code == 201
+    with check:
+        assert response.json()["certifications"] == []
+
+
+@pytest.mark.parametrize(
+    "certifications",
+    [
+        certs("UL 10C", "UL 10C"),
+        certs(""),
+        certs("X" * 65),
+        [{"standard": "UL 10C", "extra": "field"}],
+        certs(*[f"STD-{i}" for i in range(21)]),
+    ],
+    ids=["duplicate", "empty", "too-long", "extra-field", "too-many"],
+)
+def test_invalid_certifications_return_422(client, certifications):
+    response = client.post("/products", json={**PRODUCT, "certifications": certifications})
+    assert response.status_code == 422
+
+
+def test_put_replaces_certifications(client):
+    created = create(client, certifications=certs("UL 10C", "UL 437"))
+    body = {**PRODUCT, "certifications": certs("UL 437", "ANSI/BHMA A156.13 Grade 1")}
+    response = client.put(f"/products/{created['id']}", json=body)
+    with check:
+        assert response.status_code == 200
+    with check:
+        assert response.json()["certifications"] == certs("UL 437", "ANSI/BHMA A156.13 Grade 1")
+
+
+def test_put_with_same_certifications_succeeds(client):
+    """Re-sending existing standards must not trip the (product_id, standard) unique constraint."""
+    created = create(client, certifications=certs("UL 10C", "UL 437"))
+    body = {**PRODUCT, "certifications": certs("UL 10C", "UL 437")}
+    response = client.put(f"/products/{created['id']}", json=body)
+    with check:
+        assert response.status_code == 200
+    with check:
+        assert response.json()["certifications"] == certs("UL 10C", "UL 437")
+
+
+def test_patch_leaves_certifications_unchanged(client):
+    created = create(client, certifications=certs("UL 10C"))
+    response = client.patch(f"/products/{created['id']}", json={"finish": "US32D"})
+    assert response.json()["certifications"] == certs("UL 10C")
+
+
+def test_deleting_a_product_deletes_its_certifications(client, db_session):
+    created = create(client, certifications=certs("UL 10C", "UL 437"))
+    client.delete(f"/products/{created['id']}")
+    db_session.expunge_all()
+    remaining = db_session.scalar(
+        select(func.count())
+        .select_from(Certification)
+        .where(Certification.product_id == created["id"])
+    )
+    assert remaining == 0
 
 
 # --- DELETE /products/{id} ---------------------------------------------------

@@ -2,6 +2,17 @@
 
 All notable changes to catalog-service's API and behaviour. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the service uses [Semantic Versioning](https://semver.org/). See the [versioning policy](../docs/decisions.md#14-api-versioning-and-breaking-change-policy).
 
+## [0.3.0] - 2026-10-02
+
+### Added
+- Product certifications (e.g. `UL 10C`, `ANSI/BHMA A156.13 Grade 1`). Products now include a `certifications` array of `{"standard": "..."}` objects in every response.
+- `POST /products` and `PUT /products/{id}` accept an optional `certifications` array (up to 20, no duplicate standards). If it's omitted, it defaults to `[]`. `PUT` replaces the full set; `PATCH` leaves certifications unchanged.
+
+This release is backwards compatible: a new response field plus an optional request field. Clients that ignore unknown fields need no changes.
+
+### Performance
+- `GET /products` loads certifications for a whole page in one extra query, not one per product (2 queries per page instead of 1 + N). See [docs/n-plus-one.md](../docs/n-plus-one.md).
+
 ## [0.2.0] - 2026-10-02
 
 ### Changed

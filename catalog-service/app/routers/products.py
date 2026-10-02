@@ -4,11 +4,11 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db import DbSession, is_unique_violation
 from app.domain import CategoryEnum
-from app.models import SKU_UNIQUE_INDEX, Product
+from app.models import SKU_UNIQUE_INDEX, Certification, Product
 from app.pagination import InvalidCursorError, decode_cursor, encode_cursor
 from app.schemas import ProductCreate, ProductPage, ProductRead, ProductUpdate
 
@@ -19,11 +19,28 @@ MAX_PAGE_SIZE = 100  # caps the work one request can ask the database to do
 
 
 def get_product_or_404(db: Session, product_id: int) -> Product:
-    """Load a product by ID, or raise 404."""
-    product = db.get(Product, product_id)
+    """Load a product (with its certifications) by ID, or raise 404.
+
+    Eager-loading here matters beyond speed: a lazy load later would trigger autoflush, sending
+    pending changes (e.g. a duplicate SKU) to the database outside commit_or_409's try block.
+    """
+    product = db.get(Product, product_id, options=[selectinload(Product.certifications)])
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Product {product_id} not found.")
     return product
+
+
+def set_certifications(product: Product, standards: list[str]) -> None:
+    """Make the product's certifications exactly `standards`.
+
+    Diffs instead of replacing the list wholesale: SQLAlchemy flushes inserts before deletes,
+    so re-adding an existing standard would briefly violate the (product_id, standard) unique
+    constraint.
+    """
+    wanted = set(standards)
+    product.certifications = [c for c in product.certifications if c.standard in wanted]
+    existing = {c.standard for c in product.certifications}
+    product.certifications += [Certification(standard=s) for s in standards if s not in existing]
 
 
 def commit_or_409(db: Session, sku: str) -> None:
@@ -52,7 +69,12 @@ def list_products(
     ] = None,
 ) -> ProductPage:
     """List products, optionally filtered, in pages ordered by id (keyset pagination)."""
-    stmt = select(Product).order_by(Product.id).limit(limit + 1)  # one extra row: is there more?
+    stmt = (
+        select(Product)
+        .options(selectinload(Product.certifications))  # 1 extra query, not 1 per product (N+1)
+        .order_by(Product.id)
+        .limit(limit + 1)  # one extra row: is there more?
+    )
     if cursor is not None:
         try:
             after_id = decode_cursor(cursor)
@@ -77,7 +99,8 @@ def list_products(
 @router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
 def create_product(body: ProductCreate, db: DbSession) -> Product:
     """Create a product. Returns 409 if the SKU already exists."""
-    product = Product(**body.model_dump())
+    product = Product(**body.model_dump(exclude={"certifications"}))
+    set_certifications(product, [c.standard for c in body.certifications])
     db.add(product)
     commit_or_409(db, body.sku)
     return product
@@ -93,8 +116,9 @@ def get_product(product_id: int, db: DbSession) -> Product:
 def replace_product(product_id: int, body: ProductCreate, db: DbSession) -> Product:
     """Replace every field of a product. Returns 404 if missing, 409 if the SKU is taken."""
     product = get_product_or_404(db, product_id)
-    for field, value in body.model_dump().items():
+    for field, value in body.model_dump(exclude={"certifications"}).items():
         setattr(product, field, value)
+    set_certifications(product, [c.standard for c in body.certifications])
     commit_or_409(db, body.sku)
     return product
 

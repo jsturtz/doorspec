@@ -17,4 +17,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Return the application settings."""
-    return Settings()
+    return Settings()  # pyright: ignore[reportCallIssue]

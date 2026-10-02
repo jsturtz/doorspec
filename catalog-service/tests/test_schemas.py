@@ -2,6 +2,7 @@
 
 import pytest
 from pydantic import ValidationError
+from pytest_check import check
 
 from app.schemas import ProductCreate, ProductRead, ProductUpdate
 
@@ -21,8 +22,10 @@ NOT_ELECTRIFIED = {**VALID, "electrified": False, "voltage": None}
 
 def test_create_accepts_valid_product():
     product = ProductCreate(**VALID)
-    assert product.sku == "LCK-100"
-    assert product.voltage == 24
+    with check:
+        assert product.sku == "LCK-100"
+    with check:
+        assert product.voltage == 24
 
 
 def test_create_accepts_non_electrified_product_without_voltage():
@@ -31,8 +34,10 @@ def test_create_accepts_non_electrified_product_without_voltage():
 
 def test_create_strips_whitespace():
     product = ProductCreate(**{**VALID, "sku": "  LCK-100 ", "manufacturer": " Corbin Russwin "})
-    assert product.sku == "LCK-100"
-    assert product.manufacturer == "Corbin Russwin"
+    with check:
+        assert product.sku == "LCK-100"
+    with check:
+        assert product.manufacturer == "Corbin Russwin"
 
 
 @pytest.mark.parametrize(
@@ -100,14 +105,16 @@ def test_create_rejects_voltage_on_non_electrified_product():
 
 def test_create_rejects_unknown_field():
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        ProductCreate(**VALID, fire_raiting=60)
+        ProductCreate(**VALID, fire_raiting=60)  # pyright: ignore[reportCallIssue]
 
 
 def test_read_does_not_enforce_input_rules():
     """A stored row that breaks a Create rule must still be readable, not a 500."""
     product = ProductRead(id=1, **{**VALID, "voltage": None})
-    assert product.electrified is True
-    assert product.voltage is None
+    with check:
+        assert product.electrified is True
+    with check:
+        assert product.voltage is None
 
 
 def test_read_builds_from_object_attributes():
@@ -123,8 +130,10 @@ def test_read_builds_from_object_attributes():
         finish = "626"
 
     product = ProductRead.model_validate(FakeRow())
-    assert product.id == 7
-    assert product.sku == "LCK-100"
+    with check:
+        assert product.id == 7
+    with check:
+        assert product.sku == "LCK-100"
 
 
 def test_update_accepts_empty_body():

@@ -1,12 +1,10 @@
 import logging
-from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.db import DbSession
 from app.routers import products
 
 logger = logging.getLogger(__name__)
@@ -27,7 +25,7 @@ async def read_health():
 
 
 @app.get("/health/ready", tags=["health"])
-def read_ready(db: Annotated[Session, Depends(get_db)]):
+def read_ready(db: DbSession):
     """Report whether the service can reach its database."""
     try:
         db.execute(text("SELECT 1"))

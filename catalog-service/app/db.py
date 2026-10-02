@@ -1,6 +1,10 @@
 from collections.abc import Iterator
+from typing import Annotated
 
+from fastapi import Depends
+from psycopg.errors import UniqueViolation
 from sqlalchemy import MetaData, create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from . import config
@@ -9,11 +13,11 @@ settings = config.get_settings()
 
 # Create the engine responsible for managing the connection pool and database connections.
 # The echo flag enables SQL logging for debugging.
-engine = create_engine(settings.database_url, echo=True, future=True)
+engine = create_engine(settings.database_url, echo=True)
 
-# Do we want expire_on_commit=False?
-# So this is a factory that returns sessions
-SessionLocal = sessionmaker(autoflush=False, bind=engine)
+# Session factory. expire_on_commit=False keeps attribute values after commit, so a route can
+# return the object it just saved without an extra SELECT to reload it.
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 # Define a base class for declarative models. All ORM models will inherit from this base.
@@ -39,3 +43,15 @@ def get_db() -> Iterator[Session]:
         yield db
     finally:
         db.close()
+
+
+# Annotated type for dependency injection in FastAPI routes.
+DbSession = Annotated[Session, Depends(get_db)]
+
+
+# utility functions
+def is_unique_violation(exc: IntegrityError, constraint_name: str) -> bool:
+    """True if exc is a Postgres unique violation on the named constraint or index."""
+    return (
+        isinstance(exc.orig, UniqueViolation) and exc.orig.diag.constraint_name == constraint_name
+    )

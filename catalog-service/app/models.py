@@ -1,6 +1,6 @@
 from enum import Enum as PyEnum
 
-from sqlalchemy import CheckConstraint, Enum, String
+from sqlalchemy import CheckConstraint, Enum, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -14,6 +14,8 @@ from app.domain import (
     FireRatingMinutesEnum,
     MaterialEnum,
 )
+
+SKU_UNIQUE_INDEX = "ix_products_sku"
 
 
 def _string_enum(enum_cls: type[PyEnum], name: str) -> Enum:
@@ -40,6 +42,7 @@ class Product(Base):
 
     __tablename__ = "products"
     __table_args__ = (
+        Index(SKU_UNIQUE_INDEX, "sku", unique=True),
         CheckConstraint(f"fire_rating_minutes IN ({_FIRE_RATINGS})", name="fire_rating_minutes"),
         CheckConstraint(
             f"voltage > {VOLTAGE_MIN_EXCLUSIVE} AND voltage <= {VOLTAGE_MAX}", name="voltage_range"
@@ -47,7 +50,7 @@ class Product(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    sku: Mapped[str] = mapped_column(String(SKU_MAX_LENGTH), unique=True, index=True)
+    sku: Mapped[str] = mapped_column(String(SKU_MAX_LENGTH))
     category: Mapped[CategoryEnum] = mapped_column(_string_enum(CategoryEnum, "category"))
     manufacturer: Mapped[str] = mapped_column(String(MANUFACTURER_MAX_LENGTH))
     fire_rating_minutes: Mapped[int]

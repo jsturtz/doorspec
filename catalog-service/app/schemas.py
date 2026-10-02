@@ -1,44 +1,24 @@
-from enum import IntEnum, StrEnum
 from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
-class CategoryEnum(StrEnum):
-    """Enumeration of product categories."""
-
-    LOCK = "lock"
-    HINGE = "hinge"
-    CLOSER = "closer"
-    EXIT_DEVICE = "exit_device"
-    POWER_SUPPLY = "power_supply"
-
-
-class MaterialEnum(StrEnum):
-    """Enumeration of product materials."""
-
-    HOLLOW_METAL = "hollow_metal"
-    WOOD = "wood"
-    ALUMINUM = "aluminum"
-    GLASS = "glass"
-
-
-class FireRatingMinutesEnum(IntEnum):
-    """Enumeration of fire ratings in minutes."""
-
-    NONE = 0
-    MIN_20 = 20
-    MIN_45 = 45
-    MIN_60 = 60
-    MIN_90 = 90
-    MIN_180 = 180
-
+from app.domain import (
+    FINISH_MAX_LENGTH,
+    MANUFACTURER_MAX_LENGTH,
+    SKU_MAX_LENGTH,
+    SKU_PATTERN,
+    VOLTAGE_MAX,
+    VOLTAGE_MIN_EXCLUSIVE,
+    CategoryEnum,
+    FireRatingMinutesEnum,
+    MaterialEnum,
+)
 
 # Constrained types, defined once and shared by Create and Update so the rules can't drift apart.
-Sku = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Z0-9][A-Z0-9-]*$")]
-Manufacturer = Annotated[str, Field(min_length=1, max_length=100)]
-Finish = Annotated[str, Field(min_length=1, max_length=32)]
-Voltage = Annotated[int, Field(gt=0, le=48)]
+Sku = Annotated[str, Field(min_length=1, max_length=SKU_MAX_LENGTH, pattern=SKU_PATTERN)]
+Manufacturer = Annotated[str, Field(min_length=1, max_length=MANUFACTURER_MAX_LENGTH)]
+Finish = Annotated[str, Field(min_length=1, max_length=FINISH_MAX_LENGTH)]
+Voltage = Annotated[int, Field(gt=VOLTAGE_MIN_EXCLUSIVE, le=VOLTAGE_MAX)]
 
 
 class ProductBase(BaseModel):
